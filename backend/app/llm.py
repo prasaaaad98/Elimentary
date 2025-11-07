@@ -1,18 +1,19 @@
 import google.generativeai as genai
 from app.config import settings
+import logging
 
-# Configure Gemini once
 genai.configure(api_key=settings.GEMINI_API_KEY)
+logger = logging.getLogger(__name__)
 
 
 def call_llm(system_prompt: str, user_prompt: str) -> str:
-    """
-    Calls Gemini with a system instruction + user prompt and returns the text answer.
-    """
     model = genai.GenerativeModel(
         model_name=settings.GEMINI_MODEL,
         system_instruction=system_prompt,
     )
-    response = model.generate_content(user_prompt)
-    # response.text holds the combined text output
-    return response.text or ""
+    try:
+        response = model.generate_content(user_prompt)
+        return response.text or ""
+    except Exception as e:
+        logger.exception("Gemini call failed")
+        return f"LLM error: {e}"
