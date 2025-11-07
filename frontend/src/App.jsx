@@ -1,4 +1,5 @@
 import { useState } from "react";
+import "./App.css";
 import Startup from "./Startup";
 import Chat from "./Chat";
 
