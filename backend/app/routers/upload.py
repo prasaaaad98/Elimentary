@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import Document
 from app.schemas import UploadResponse
-from app.parsing import parse_pdf_and_populate_metrics
+from app.parsing import parse_pdf_and_populate_metrics, classify_pdf_as_financial
 
 router = APIRouter()
 
@@ -54,20 +54,34 @@ async def upload_balance_sheet(
         # Get absolute path for storage in DB
         absolute_path = str(storage_path.resolve())
         
-        # Create Document record
+        # Classify PDF as financial or non-financial BEFORE creating DB record
+        is_financial, classification_reason = classify_pdf_as_financial(absolute_path)
+        
+        # If not a financial document, reject with 400 error and clean up file
+        if not is_financial:
+            if storage_path.exists():
+                storage_path.unlink()
+            raise HTTPException(
+                status_code=400,
+                detail=f"Uploaded PDF is not a financial document. {classification_reason}"
+            )
+        
+        # Create Document record with classification (only for financial documents)
         doc = Document(
             filename=file.filename,
             storage_path=absolute_path,
             company_name=None,  # Will be filled by parser
             fiscal_year=None,   # Will be filled by parser
-            company_code=None
+            company_code=None,
+            is_financial_report=is_financial,
+            classification_reason=classification_reason
         )
         
         db.add(doc)
         db.commit()
         db.refresh(doc)
         
-        # Parse PDF and populate metrics
+        # Parse PDF and populate metrics (only for financial documents)
         try:
             parse_pdf_and_populate_metrics(doc, db)
             # Refresh to get updated company_name and fiscal_year
@@ -85,6 +99,9 @@ async def upload_balance_sheet(
             fiscal_year=doc.fiscal_year
         )
     
+    except HTTPException:
+        # Re-raise HTTPException as-is (e.g., 400 for non-financial documents)
+        raise
     except Exception as e:
         # Clean up file if document creation failed
         if 'storage_path' in locals() and storage_path.exists():

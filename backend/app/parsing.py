@@ -1,7 +1,7 @@
 import json
 import logging
 import re
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Tuple
 
 import pdfplumber
 from sqlalchemy.orm import Session
@@ -48,6 +48,99 @@ def _find_pages_with_keywords(pdf: pdfplumber.PDF, keywords: List[str]) -> List[
         if any(kw.lower() in lower for kw in keywords):
             indices.append(i)
     return indices
+
+
+def classify_pdf_as_financial(pdf_path: str) -> Tuple[bool, str]:
+    """
+    Classify a PDF as financial (balance sheet/annual report) or non-financial.
+    Returns (is_financial: bool, reason: str)
+    """
+    logger.info("Classifying PDF: %s", pdf_path)
+    
+    try:
+        with pdfplumber.open(pdf_path) as pdf:
+            pages = pdf.pages
+            # Extract text from first 5 pages for classification
+            # This is usually enough to determine document type
+            sample_text = "\n\n".join(
+                (pages[i].extract_text() or "") for i in range(min(5, len(pages)))
+            )
+            
+            # If PDF is very short or has no text, it's likely not a financial document
+            if len(sample_text.strip()) < 100:
+                return False, "PDF contains insufficient text content to be a financial document"
+            
+            classification_system = (
+                "You are a document classifier specializing in financial documents. "
+                "Your task is to determine if a PDF document is a financial report (balance sheet, annual report, "
+                "quarterly report, financial statements) or a non-financial document (novel, marksheet, "
+                "general document, etc.). Be strict: only classify as financial if the document clearly contains "
+                "financial statements, balance sheets, profit & loss statements, or annual/quarterly financial reports."
+            )
+            
+            classification_user = f"""
+Analyze the following text extracted from the first pages of a PDF document:
+
+\"\"\"{sample_text[:5000]}\"\"\"
+
+Determine if this is a financial document (balance sheet, annual report, financial statements) or a non-financial document.
+
+Return ONLY valid JSON with the following structure:
+{{
+  "is_financial": true or false,
+  "reason": "Brief explanation of why this document is or is not a financial report"
+}}
+
+Examples of financial documents:
+- Annual reports with balance sheets and P&L statements
+- Quarterly financial reports
+- Consolidated financial statements
+- Standalone financial statements
+
+Examples of non-financial documents:
+- Novels, books, literature
+- Academic marksheets, certificates
+- General business documents without financial data
+- Marketing materials
+- Legal documents (unless they contain financial statements)
+- Research papers
+
+Be strict: if the document does not clearly contain financial statements, balance sheets, or profit & loss data, classify it as non-financial.
+"""
+            
+            classification_raw = call_llm(classification_system, classification_user)
+            classification = _extract_json(classification_raw, "PDF classification")
+            
+            if isinstance(classification, dict):
+                is_financial = classification.get("is_financial", False)
+                reason = classification.get("reason", "Classification completed")
+                logger.info(
+                    "Classification result for %s: is_financial=%s, reason=%s",
+                    pdf_path,
+                    is_financial,
+                    reason
+                )
+                return bool(is_financial), str(reason)
+            else:
+                # Fallback: check for common financial keywords
+                sample_lower = sample_text.lower()
+                financial_keywords = [
+                    "balance sheet", "profit and loss", "financial statement",
+                    "annual report", "revenue", "assets", "liabilities",
+                    "cash flow", "statement of financial position",
+                    "consolidated", "standalone"
+                ]
+                has_financial_keywords = any(keyword in sample_lower for keyword in financial_keywords)
+                
+                if has_financial_keywords:
+                    return True, "Document contains financial keywords (fallback classification)"
+                else:
+                    return False, "Document does not appear to be a financial report (fallback classification)"
+                    
+    except Exception as e:
+        logger.exception("Error classifying PDF %s: %s", pdf_path, e)
+        # On error, be conservative and reject
+        return False, f"Error analyzing PDF: {str(e)}"
 
 
 def parse_pdf_and_populate_metrics(doc: Document, db: Session) -> None:

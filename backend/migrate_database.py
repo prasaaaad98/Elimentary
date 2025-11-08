@@ -1,0 +1,63 @@
+"""
+Migration script to add is_financial_report and classification_reason columns to documents table.
+This script safely adds the new columns if they don't already exist.
+"""
+import sqlite3
+from pathlib import Path
+from app.config import settings
+
+
+def migrate_database():
+    """Add new columns to documents table if they don't exist."""
+    # Extract database path from DATABASE_URL
+    db_url = settings.DATABASE_URL
+    if db_url.startswith("sqlite:///"):
+        db_path = db_url.replace("sqlite:///", "")
+        db_path = Path(db_path)
+    else:
+        print(f"Unsupported database URL: {db_url}")
+        return
+    
+    if not db_path.exists():
+        print(f"Database file {db_path} does not exist. It will be created on first run.")
+        return
+    
+    print(f"Connecting to database: {db_path}")
+    conn = sqlite3.connect(str(db_path))
+    cursor = conn.cursor()
+    
+    try:
+        # Check if columns already exist
+        cursor.execute("PRAGMA table_info(documents)")
+        columns = [row[1] for row in cursor.fetchall()]
+        
+        # Add is_financial_report column if it doesn't exist
+        if "is_financial_report" not in columns:
+            print("Adding is_financial_report column...")
+            cursor.execute("ALTER TABLE documents ADD COLUMN is_financial_report BOOLEAN")
+            print("[OK] Added is_financial_report column")
+        else:
+            print("[OK] is_financial_report column already exists")
+        
+        # Add classification_reason column if it doesn't exist
+        if "classification_reason" not in columns:
+            print("Adding classification_reason column...")
+            cursor.execute("ALTER TABLE documents ADD COLUMN classification_reason TEXT")
+            print("[OK] Added classification_reason column")
+        else:
+            print("[OK] classification_reason column already exists")
+        
+        conn.commit()
+        print("\nMigration completed successfully!")
+        
+    except Exception as e:
+        conn.rollback()
+        print(f"\nError during migration: {e}")
+        raise
+    finally:
+        conn.close()
+
+
+if __name__ == "__main__":
+    migrate_database()
+
