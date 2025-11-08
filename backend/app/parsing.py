@@ -7,13 +7,40 @@ from datetime import datetime
 import pdfplumber
 from sqlalchemy.orm import Session
 
-from app.llm import call_llm
-from app.models import Document, FinancialMetric
+from app.llm import call_llm, embed_texts
+from app.models import Document, FinancialMetric, DocumentChunk
 
 
 
 
 logger = logging.getLogger(__name__)
+
+
+def chunk_text(text: str, max_chars: int = 1200, overlap: int = 200) -> list[str]:
+    """
+    Simple character-based chunking with overlap. This is enough for RAG usage in this project.
+    max_chars: maximum length of each chunk.
+    overlap: number of characters of overlap between consecutive chunks.
+    """
+    text = text.strip()
+    if not text:
+        return []
+    
+    chunks: list[str] = []
+    start = 0
+    length = len(text)
+    
+    while start < length:
+        end = min(start + max_chars, length)
+        chunk = text[start:end].strip()
+        if chunk:
+            chunks.append(chunk)
+        if end >= length:
+            break
+        # Overlap
+        start = max(0, end - overlap)
+    
+    return chunks
 
 
 def _extract_json(raw: str, context: str) -> Any | None:
@@ -344,6 +371,59 @@ Values should be numeric (floats), no commas or currency symbols.
         logger.info("Inserted Balance Sheet metrics for doc %s", doc.id)
     else:
         logger.warning("Balance Sheet JSON not parsed for doc %s", doc.id)
+    
+    # 5) Extract full text, chunk it, and store embeddings for RAG
+    try:
+        # Reopen PDF to extract full text (we closed it earlier)
+        with pdfplumber.open(doc.storage_path) as pdf:
+            pages = pdf.pages
+            
+            # Extract text from all pages
+            page_texts: list[str] = []
+            for page in pages:
+                t = page.extract_text() or ""
+                page_texts.append(t)
+            
+            # Build chunk tuples (page_number, chunk_index, text)
+            raw_chunks: list[tuple[int, int, str]] = []
+            for page_idx, text in enumerate(page_texts):
+                if not text.strip():
+                    continue
+                page_chunks = chunk_text(text)
+                for ci, ch in enumerate(page_chunks):
+                    raw_chunks.append((page_idx + 1, ci, ch))  # 1-based page numbers
+            
+            # Embed and store chunks
+            if raw_chunks:
+                texts_to_embed = [ch for (_, _, ch) in raw_chunks]
+                try:
+                    logger.info("Embedding %d chunks for document %s", len(texts_to_embed), doc.id)
+                    vectors = embed_texts(texts_to_embed)
+                    logger.info("Successfully embedded %d chunks for document %s", len(vectors), doc.id)
+                except Exception as e:
+                    # Log but don't crash the entire parse. RAG will just be unavailable.
+                    logger.exception("Embedding failed for document %s: %s", doc.id, e)
+                    vectors = [None] * len(raw_chunks)
+                
+                # Store chunks with embeddings
+                for (page_num, chunk_idx, ch), emb in zip(raw_chunks, vectors):
+                    dc = DocumentChunk(
+                        document_id=doc.id,
+                        page_number=page_num,
+                        chunk_index=chunk_idx,
+                        text=ch,
+                        embedding=emb,  # JSON column stores list directly
+                    )
+                    db.add(dc)
+                
+                db.commit()
+                logger.info("Stored %d chunks for document %s", len(raw_chunks), doc.id)
+            else:
+                logger.warning("No text chunks extracted for document %s", doc.id)
+                
+    except Exception as e:
+        # Log but don't fail the entire parsing if chunking/embedding fails
+        logger.exception("Error during chunking/embedding for document %s: %s", doc.id, e)
     
     # Mark document as processed after successful parsing
     doc.processed_at = datetime.utcnow()

@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, ForeignKey, Boolean, Text, DateTime
+from sqlalchemy import Column, Integer, String, Float, ForeignKey, Boolean, Text, DateTime, JSON
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from app.database import Base
@@ -44,3 +44,16 @@ class FinancialMetric(Base):
 
     company = relationship("Company", back_populates="metrics")
     document = relationship("Document", back_populates="metrics")
+
+
+class DocumentChunk(Base):
+    __tablename__ = "document_chunks"
+
+    id = Column(Integer, primary_key=True, index=True)
+    document_id = Column(Integer, ForeignKey("documents.id"), nullable=False)
+    page_number = Column(Integer, nullable=True)   # 1-based page index
+    chunk_index = Column(Integer, nullable=False)  # position within document
+    text = Column(Text, nullable=False)
+    embedding = Column(JSON, nullable=True)  # Store embedding vector as JSON array
+
+    document = relationship("Document", backref="chunks")

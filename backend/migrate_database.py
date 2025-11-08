@@ -76,6 +76,30 @@ def migrate_database():
         else:
             print("[OK] No rows needed updating")
         
+        # Check if document_chunks table exists, create if not
+        cursor.execute("""
+            SELECT name FROM sqlite_master 
+            WHERE type='table' AND name='document_chunks'
+        """)
+        table_exists = cursor.fetchone() is not None
+        
+        if not table_exists:
+            print("Creating document_chunks table...")
+            cursor.execute("""
+                CREATE TABLE document_chunks (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    document_id INTEGER NOT NULL,
+                    page_number INTEGER,
+                    chunk_index INTEGER NOT NULL,
+                    text TEXT NOT NULL,
+                    embedding TEXT,
+                    FOREIGN KEY (document_id) REFERENCES documents(id)
+                )
+            """)
+            print("[OK] Created document_chunks table")
+        else:
+            print("[OK] document_chunks table already exists")
+        
         conn.commit()
         print("\nMigration completed successfully!")
         

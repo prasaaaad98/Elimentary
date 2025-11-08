@@ -8,6 +8,7 @@ from app.database import get_db
 from app.models import Company, FinancialMetric, Document
 from app.schemas import ChatRequest, ChatResponse, ChartData, ChartSeries
 from app.llm import call_llm
+from app.retrieval import retrieve_relevant_chunks
 
 router = APIRouter()
 
@@ -300,45 +301,90 @@ def chat_query(payload: ChatRequest, db: Session = Depends(get_db)):
         chart_data = _build_chart_data(years, metrics)
         return ChatResponse(answer=overview, chart_data=chart_data)
     
+    # ---- RAG: Retrieve relevant text chunks (only for document-based queries) ----
+    rag_chunks = []
+    text_context = ""
+    if payload.document_id:
+        try:
+            rag_chunks = retrieve_relevant_chunks(
+                db=db,
+                document_id=payload.document_id,
+                question=user_question,
+                top_k=12,  # Increased from 5 to get better coverage, especially for MD&A questions
+            )
+            if rag_chunks:
+                joined = "\n\n---\n\n".join(rag_chunks)
+                # Increased limit to allow more context for complex questions
+                text_context = joined[:6000] if len(joined) > 6000 else joined
+        except Exception as e:
+            # Log but continue - RAG is optional, metrics still work
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning("RAG retrieval failed for document %s: %s", payload.document_id, e)
+    
     # ---- System prompt tuned by role ----
     system_prompt = (
-        "You are a financial analyst assistant for balance sheet and P&L analysis. "
-        "You MUST base your answer ONLY on the data provided in the context from the uploaded document. "
-        "If a specific number or year is not provided in the context, explicitly say you don't have that information from this document. "
-        "Do NOT invent or hallucinate data. Do NOT use information from the internet or general knowledge. "
-        "Only use the exact numbers provided in the context."
+        "You are a financial analyst assistant. You answer questions about a company's performance "
+        "STRICTLY based on the following:\n\n"
+        "1. Structured financial metrics provided to you (revenues, net profits, assets, liabilities, by year).\n"
+        "2. Text excerpts taken directly from the company's official balance sheet / annual report PDF.\n\n"
+        "Important context about annual reports:\n"
+        "* Annual reports typically contain multiple sections: Management Discussion and Analysis (MD&A), "
+        "Financial Statements, Notes to Accounts, and Auditor's Reports.\n"
+        "* Management Discussion and Analysis (MD&A) sections contain explanations, reasons, strategies, "
+        "risks, and management's perspective on performance changes.\n"
+        "* Financial Statements contain the actual numbers (revenues, profits, assets, etc.).\n"
+        "* Auditor's Reports contain audit opinions and procedures, but NOT management's explanations.\n\n"
+        "Rules:\n"
+        "* Use the metrics when answering numeric and trend questions.\n"
+        "* Use the text excerpts for qualitative, descriptive, or explanatory questions.\n"
+        "* For questions about 'reasons', 'explanations', 'why', 'factors', or 'management's perspective', "
+        "look for content from Management Discussion sections, not just financial statements or auditor reports.\n"
+        "* If the text excerpts contain Management Discussion content, use it to answer management-related questions.\n"
+        "* If the answer is not clearly supported by either the metrics or the excerpts, say you do NOT have that information in this document.\n"
+        "* Do NOT invent numbers or facts that are not in the provided context.\n"
+        "* Do NOT use external internet or prior knowledge; only rely on this document."
     )
     
     rl = payload.role.lower()
     if "ceo" in rl:
         system_prompt += (
-            " The user is a CEO. Be concise, focus on key trends, risks, and actions, "
-            "not too much raw detail."
+            "\n\nThe user's role is: CEO/top management. Focus on high-level insights, key risks, and implications."
         )
     elif "analyst" in rl:
         system_prompt += (
-            " The user is an analyst. Be detailed, mention actual figures and explain the trends."
+            "\n\nThe user's role is: Analyst. You can include more detailed breakdowns and commentary."
         )
     else:
         system_prompt += (
-            " The user is senior management. Provide an executive summary with some key numbers."
+            "\n\nThe user's role is: Senior management. Provide an executive summary with some key numbers."
         )
     
     # Compose final user prompt for Gemini
     fiscal_info = f" (Fiscal Year: {fiscal_year})" if fiscal_year else ""
-    full_user_prompt = f"""
-Company: {company_name}{fiscal_info}
+    
+    # Build metrics block
+    metrics_block = ""
+    if data_context and data_context != "No financial data available.":
+        metrics_block = f"Structured financial metrics extracted from this document:\n{data_context}\n\n"
+    
+    # Build RAG text block
+    rag_block = ""
+    if text_context:
+        rag_block = (
+            "Relevant text excerpts from the uploaded PDF (these are direct or near-direct extracts):\n"
+            f"{text_context}\n\n"
+        )
+    
+    full_user_prompt = f"""Company: {company_name}{fiscal_info}
 Role: {payload.role}
 
-Available financial data extracted from the uploaded document:
-{data_context}
+{metrics_block}{rag_block}Based ONLY on the above metrics and text excerpts, answer the user's question.
 
-User question:
-{user_question}
+User's question: {user_question}
 
-Using ONLY the data above from this specific document, answer the question. 
-Do not invent years or numbers you do not see. 
-If the question asks about something not in the data, say "I don't have that information from this document."
+Important: If the question asks about something not clearly mentioned in either the metrics or text excerpts above, 
+say "I don't have that information from this document." Do not make up facts or numbers.
 """
     
     llm_answer = call_llm(system_prompt, full_user_prompt)
