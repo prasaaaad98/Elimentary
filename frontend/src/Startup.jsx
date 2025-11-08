@@ -10,7 +10,7 @@ const roles = ["Analyst", "CEO", "Group Management"];
 
 const backendBaseUrl = "http://127.0.0.1:8000";
 
-export default function Startup({ onStart }) {
+export default function Startup({ onStart, documents = [], onDocumentsReload }) {
   const [selectedCompany, setSelectedCompany] = useState(companies[0].code);
   const [selectedRole, setSelectedRole] = useState(roles[0]);
   const [selectedFile, setSelectedFile] = useState(null);
@@ -74,6 +74,10 @@ export default function Startup({ onStart }) {
       );
 
       const { document_id, company_name, fiscal_year } = response.data;
+      // Reload documents list after successful upload
+      if (onDocumentsReload) {
+        onDocumentsReload();
+      }
       onStart(document_id, company_name, selectedRole, fiscal_year, true); // true indicates upload mode
     } catch (error) {
       console.error("Upload error:", error);
@@ -537,6 +541,176 @@ export default function Startup({ onStart }) {
               Start Analysis
             </button>
           </form>
+        )}
+
+        {/* Recent Balance Sheets Section */}
+        {documents && documents.length > 0 && (
+          <div
+            style={{
+              marginTop: "40px",
+              paddingTop: "32px",
+              borderTop: "1px solid rgba(255, 255, 255, 0.1)",
+            }}
+          >
+            <div
+              style={{
+                fontSize: "16px",
+                fontWeight: "600",
+                color: "#ffffff",
+                marginBottom: "16px",
+                letterSpacing: "0.3px",
+              }}
+            >
+              Recent Balance Sheets
+            </div>
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                gap: "12px",
+                maxHeight: "400px",
+                overflowY: "auto",
+              }}
+            >
+              {documents.map((doc) => (
+                <div
+                  key={doc.id}
+                  style={{
+                    background: "rgba(255, 255, 255, 0.05)",
+                    borderRadius: "8px",
+                    padding: "16px",
+                    border: "1px solid rgba(255, 255, 255, 0.1)",
+                    transition: "all 0.3s ease",
+                    cursor: "pointer",
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = "rgba(255, 255, 255, 0.08)";
+                    e.currentTarget.style.borderColor = "rgba(74, 158, 255, 0.5)";
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = "rgba(255, 255, 255, 0.05)";
+                    e.currentTarget.style.borderColor = "rgba(255, 255, 255, 0.1)";
+                  }}
+                  onClick={() => {
+                    onStart(
+                      doc.id,
+                      doc.company_name || "Unknown company",
+                      selectedRole,
+                      doc.fiscal_year || "Unknown period",
+                      true
+                    );
+                  }}
+                >
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "flex-start",
+                      marginBottom: "8px",
+                    }}
+                  >
+                    <div style={{ flex: 1 }}>
+                      <div
+                        style={{
+                          fontSize: "15px",
+                          fontWeight: "600",
+                          color: "#ffffff",
+                          marginBottom: "4px",
+                        }}
+                      >
+                        {doc.company_name || "Unknown Company"}
+                      </div>
+                      <div
+                        style={{
+                          fontSize: "13px",
+                          color: "rgba(255, 255, 255, 0.6)",
+                          marginBottom: "4px",
+                        }}
+                      >
+                        {doc.fiscal_year || "Unknown Period"}
+                      </div>
+                      {doc.latest_year && (
+                        <div
+                          style={{
+                            fontSize: "12px",
+                            color: "rgba(255, 255, 255, 0.5)",
+                          }}
+                        >
+                          Latest: {doc.latest_year}
+                        </div>
+                      )}
+                    </div>
+                    <button
+                      style={{
+                        padding: "6px 12px",
+                        fontSize: "13px",
+                        fontWeight: "500",
+                        background: "rgba(74, 158, 255, 0.2)",
+                        border: "1px solid rgba(74, 158, 255, 0.3)",
+                        color: "#4a9eff",
+                        borderRadius: "6px",
+                        cursor: "pointer",
+                        transition: "all 0.3s ease",
+                      }}
+                      onMouseEnter={(e) => {
+                        e.target.style.background = "rgba(74, 158, 255, 0.3)";
+                        e.target.style.borderColor = "rgba(74, 158, 255, 0.5)";
+                      }}
+                      onMouseLeave={(e) => {
+                        e.target.style.background = "rgba(74, 158, 255, 0.2)";
+                        e.target.style.borderColor = "rgba(74, 158, 255, 0.3)";
+                      }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onStart(
+                          doc.id,
+                          doc.company_name || "Unknown company",
+                          selectedRole,
+                          doc.fiscal_year || "Unknown period",
+                          true
+                        );
+                      }}
+                    >
+                      Open
+                    </button>
+                  </div>
+                  {(doc.latest_revenue !== null && doc.latest_revenue !== undefined) ||
+                  (doc.latest_net_profit !== null && doc.latest_net_profit !== undefined) ? (
+                    <div
+                      style={{
+                        display: "flex",
+                        gap: "16px",
+                        marginTop: "8px",
+                        paddingTop: "8px",
+                        borderTop: "1px solid rgba(255, 255, 255, 0.05)",
+                      }}
+                    >
+                      {doc.latest_revenue !== null && doc.latest_revenue !== undefined && (
+                        <div
+                          style={{
+                            fontSize: "12px",
+                            color: "rgba(255, 255, 255, 0.7)",
+                          }}
+                        >
+                          Revenue: {doc.latest_revenue.toLocaleString()} Cr
+                        </div>
+                      )}
+                      {doc.latest_net_profit !== null && doc.latest_net_profit !== undefined && (
+                        <div
+                          style={{
+                            fontSize: "12px",
+                            color: "rgba(255, 255, 255, 0.7)",
+                          }}
+                        >
+                          Net Profit: {doc.latest_net_profit.toLocaleString()} Cr
+                        </div>
+                      )}
+                    </div>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+          </div>
         )}
       </div>
     </div>

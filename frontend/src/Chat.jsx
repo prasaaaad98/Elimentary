@@ -18,7 +18,7 @@ const SendIcon = ({ disabled }) => (
   </svg>
 );
 
-export default function Chat({ documentId, companyCode, companyName, fiscalYear, role, onReset }) {
+export default function Chat({ documentId, companyCode, companyName, fiscalYear, role, onReset, documents = [], onSwitchDocument }) {
   const [messages, setMessages] = useState([
     {
       role: "assistant",
@@ -32,6 +32,21 @@ export default function Chat({ documentId, companyCode, companyName, fiscalYear,
   const inputRef = useRef(null);
 
   const backendBaseUrl = "http://127.0.0.1:8000";
+
+  // Reset messages when documentId changes (only on actual change, not on initial mount if already set)
+  const prevDocumentIdRef = useRef(documentId);
+  useEffect(() => {
+    if (documentId && prevDocumentIdRef.current !== documentId) {
+      setMessages([
+        {
+          role: "assistant",
+          content: `You are analyzing ${companyName || "the company"} as a ${role}. Ask anything about its financial performance.`,
+        },
+      ]);
+      setChartData(null);
+      prevDocumentIdRef.current = documentId;
+    }
+  }, [documentId, companyName, role]);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -167,6 +182,76 @@ export default function Chat({ documentId, companyCode, companyName, fiscalYear,
           Change
         </button>
       </header>
+
+      {/* Document Switching Panel */}
+      {documents && documents.length > 0 && documentId && onSwitchDocument && (
+        <div
+          style={{
+            padding: "16px 24px",
+            background: "rgba(26, 26, 46, 0.4)",
+            borderBottom: "1px solid rgba(255, 255, 255, 0.1)",
+          }}
+        >
+          <div
+            style={{
+              maxWidth: "900px",
+              width: "100%",
+              margin: "0 auto",
+            }}
+          >
+            <div
+              style={{
+                fontSize: "13px",
+                fontWeight: "500",
+                color: "rgba(255, 255, 255, 0.7)",
+                marginBottom: "12px",
+              }}
+            >
+              Other Reports
+            </div>
+            <div
+              style={{
+                display: "flex",
+                gap: "8px",
+                overflowX: "auto",
+                paddingBottom: "4px",
+              }}
+            >
+              {documents
+                .filter((doc) => doc.id !== documentId)
+                .slice(0, 5)
+                .map((doc) => (
+                  <button
+                    key={doc.id}
+                    onClick={() => onSwitchDocument(doc)}
+                    style={{
+                      padding: "8px 16px",
+                      fontSize: "13px",
+                      background: "rgba(255, 255, 255, 0.05)",
+                      border: "1px solid rgba(255, 255, 255, 0.1)",
+                      color: "#ffffff",
+                      borderRadius: "6px",
+                      cursor: "pointer",
+                      transition: "all 0.3s ease",
+                      whiteSpace: "nowrap",
+                      flexShrink: 0,
+                    }}
+                    onMouseEnter={(e) => {
+                      e.target.style.background = "rgba(255, 255, 255, 0.1)";
+                      e.target.style.borderColor = "rgba(74, 158, 255, 0.4)";
+                    }}
+                    onMouseLeave={(e) => {
+                      e.target.style.background = "rgba(255, 255, 255, 0.05)";
+                      e.target.style.borderColor = "rgba(255, 255, 255, 0.1)";
+                    }}
+                  >
+                    {doc.company_name || "Unknown"} • {doc.fiscal_year || "N/A"}
+                  </button>
+                ))}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Messages Area - Centered */}
       <div

@@ -1,54 +1,98 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import axios from "axios";
 import "./App.css";
 import Startup from "./Startup";
 import Chat from "./Chat";
 
-function App() {
-  // For upload mode (document_id)
-  const [documentId, setDocumentId] = useState(null);
-  // For legacy mode (company_code)
-  const [companyCode, setCompanyCode] = useState(null);
-  const [companyName, setCompanyName] = useState(null);
-  const [fiscalYear, setFiscalYear] = useState(null);
-  const [role, setRole] = useState(null);
-  const [isUploadMode, setIsUploadMode] = useState(false);
+const backendBaseUrl = "http://127.0.0.1:8000";
 
-  if ((!documentId && !companyCode) || !role) {
+function App() {
+  // Session state - unified structure
+  const [session, setSession] = useState(null);
+  const [documents, setDocuments] = useState([]);
+
+  // Fetch documents on mount and when needed
+  const fetchDocuments = async () => {
+    try {
+      const res = await axios.get(`${backendBaseUrl}/documents`);
+      setDocuments(res.data.documents || []);
+    } catch (err) {
+      console.error("Failed to load documents list", err);
+    }
+  };
+
+  useEffect(() => {
+    fetchDocuments();
+  }, []);
+
+  // Handle session start (from upload or document selection)
+  const handleSessionStart = (idOrCode, name, role, year, isUpload) => {
+    if (isUpload) {
+      // Upload mode: idOrCode is document_id
+      setSession({
+        documentId: idOrCode,
+        companyCode: null,
+        companyName: name,
+        fiscalYear: year,
+        role: role,
+        isUploadMode: true,
+      });
+      // Refresh documents list after upload
+      fetchDocuments();
+    } else {
+      // Legacy mode: idOrCode is company_code
+      setSession({
+        documentId: null,
+        companyCode: idOrCode,
+        companyName: name,
+        fiscalYear: year,
+        role: role,
+        isUploadMode: false,
+      });
+    }
+  };
+
+  // Handle document switching (from Chat component)
+  const handleSwitchDocument = (docSummary) => {
+    setSession({
+      documentId: docSummary.id,
+      companyCode: null,
+      companyName: docSummary.company_name || "Unknown company",
+      fiscalYear: docSummary.fiscal_year || "Unknown period",
+      role: session?.role || "Analyst", // Keep same role
+      isUploadMode: true,
+    });
+  };
+
+  // Handle reset (back to startup)
+  const handleReset = () => {
+    setSession(null);
+    // Optionally refresh documents when going back
+    fetchDocuments();
+  };
+
+  // Show startup if no session
+  if (!session) {
     return (
       <Startup
-        onStart={(idOrCode, name, r, year, isUpload) => {
-          if (isUpload) {
-            // Upload mode: idOrCode is document_id
-            setDocumentId(idOrCode);
-            setIsUploadMode(true);
-          } else {
-            // Legacy mode: idOrCode is company_code
-            setCompanyCode(idOrCode);
-            setIsUploadMode(false);
-          }
-          setCompanyName(name);
-          setFiscalYear(year);
-          setRole(r);
-        }}
+        onStart={handleSessionStart}
+        documents={documents}
+        onDocumentsReload={fetchDocuments}
       />
     );
   }
 
+  // Show chat if session exists
   return (
     <Chat
-      documentId={documentId}
-      companyCode={companyCode}
-      companyName={companyName}
-      fiscalYear={fiscalYear}
-      role={role}
-      onReset={() => {
-        setDocumentId(null);
-        setCompanyCode(null);
-        setCompanyName(null);
-        setFiscalYear(null);
-        setRole(null);
-        setIsUploadMode(false);
-      }}
+      documentId={session.documentId}
+      companyCode={session.companyCode}
+      companyName={session.companyName}
+      fiscalYear={session.fiscalYear}
+      role={session.role}
+      documents={documents}
+      onReset={handleReset}
+      onSwitchDocument={handleSwitchDocument}
     />
   );
 }
