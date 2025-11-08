@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.database import Base, engine
-from app.routers import chat, upload
+from app.routers import chat, upload, documents
 
 # Create tables
 Base.metadata.create_all(bind=engine)
@@ -21,6 +21,7 @@ app.add_middleware(
 
 app.include_router(chat.router, prefix="/chat", tags=["chat"])
 app.include_router(upload.router, prefix="/upload", tags=["upload"])
+app.include_router(documents.router, prefix="", tags=["documents"])
 
 
 @app.get("/health")

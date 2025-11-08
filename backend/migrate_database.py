@@ -47,6 +47,35 @@ def migrate_database():
         else:
             print("[OK] classification_reason column already exists")
         
+        # Add created_at column if it doesn't exist
+        if "created_at" not in columns:
+            print("Adding created_at column...")
+            cursor.execute("ALTER TABLE documents ADD COLUMN created_at DATETIME")
+            print("[OK] Added created_at column")
+        else:
+            print("[OK] created_at column already exists")
+        
+        # Add processed_at column if it doesn't exist
+        if "processed_at" not in columns:
+            print("Adding processed_at column...")
+            cursor.execute("ALTER TABLE documents ADD COLUMN processed_at DATETIME")
+            print("[OK] Added processed_at column")
+        else:
+            print("[OK] processed_at column already exists")
+        
+        # Set default created_at for existing rows that have NULL
+        print("Setting default created_at for existing rows...")
+        cursor.execute("""
+            UPDATE documents 
+            SET created_at = datetime('now') 
+            WHERE created_at IS NULL
+        """)
+        updated_count = cursor.rowcount
+        if updated_count > 0:
+            print(f"[OK] Updated {updated_count} existing rows with default created_at")
+        else:
+            print("[OK] No rows needed updating")
+        
         conn.commit()
         print("\nMigration completed successfully!")
         

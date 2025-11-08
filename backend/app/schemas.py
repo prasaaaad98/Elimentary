@@ -1,5 +1,6 @@
 from pydantic import BaseModel
 from typing import List, Optional, Literal
+from datetime import datetime
 
 
 class ChatMessage(BaseModel):
@@ -33,3 +34,21 @@ class UploadResponse(BaseModel):
     document_id: int
     company_name: Optional[str] = None
     fiscal_year: Optional[str] = None
+
+
+class DocumentSummary(BaseModel):
+    id: int
+    company_name: Optional[str] = None
+    fiscal_year: Optional[str] = None
+    filename: str
+    created_at: Optional[datetime] = None
+    latest_year: Optional[int] = None
+    latest_revenue: Optional[float] = None
+    latest_net_profit: Optional[float] = None
+
+    class Config:
+        from_attributes = True
+
+
+class DocumentListResponse(BaseModel):
+    documents: List[DocumentSummary]

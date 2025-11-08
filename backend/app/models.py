@@ -1,4 +1,5 @@
-from sqlalchemy import Column, Integer, String, Float, ForeignKey, Boolean, Text
+from sqlalchemy import Column, Integer, String, Float, ForeignKey, Boolean, Text, DateTime
+from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from app.database import Base
 
@@ -22,8 +23,10 @@ class Document(Base):
     company_name = Column(String, nullable=True)
     fiscal_year = Column(String, nullable=True)  # e.g. "FY 2023-24"
     company_code = Column(String, nullable=True)  # optional, for grouping/legacy
-    is_financial_report = Column(Boolean, nullable=True)  # True if PDF is a financial document
+    is_financial_report = Column(Boolean, default=True)
     classification_reason = Column(Text, nullable=True)  # Explanation for classification decision
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    processed_at = Column(DateTime(timezone=True), nullable=True)
 
     metrics = relationship("FinancialMetric", back_populates="document")
 

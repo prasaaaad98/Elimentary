@@ -2,6 +2,7 @@ import json
 import logging
 import re
 from typing import List, Dict, Any, Tuple
+from datetime import datetime
 
 import pdfplumber
 from sqlalchemy.orm import Session
@@ -343,3 +344,9 @@ Values should be numeric (floats), no commas or currency symbols.
         logger.info("Inserted Balance Sheet metrics for doc %s", doc.id)
     else:
         logger.warning("Balance Sheet JSON not parsed for doc %s", doc.id)
+    
+    # Mark document as processed after successful parsing
+    doc.processed_at = datetime.utcnow()
+    db.add(doc)
+    db.commit()
+    logger.info("Marked document %s as processed", doc.id)
