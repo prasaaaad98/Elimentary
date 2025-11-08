@@ -60,6 +60,32 @@ def chat_query(payload: ChatRequest, db: Session = Depends(get_db)):
 
     user_question = payload.messages[-1].content if payload.messages else ""
 
+
+    normalized = "".join(
+        ch for ch in user_question.lower() if ch.isalpha() or ch.isspace()
+    ).strip()
+
+    greeting_keywords = [
+        "hi",
+        "hello",
+        "hey",
+        "good morning",
+        "good afternoon",
+        "good evening",
+    ]
+
+    # If it's basically just a greeting (short and matches one of the patterns),
+    # reply with a simple greeting and DO NOT call the LLM.
+    if any(
+        normalized == kw or normalized.startswith(kw + " ")
+        for kw in greeting_keywords
+    ) and len(normalized.split()) <= 5:
+        greeting_answer = (
+            f"Hi! I'm your financial copilot for {company.name}. "
+            "You can ask me about revenue, profit, assets, liabilities, trends, "
+            "or ratios based on the company's published balance sheet."
+        )
+        return ChatResponse(answer=greeting_answer, chart_data=None)
     # 4. System prompt tuned by role
     system_prompt = (
         "You are a financial analyst assistant for balance sheet and P&L analysis. "
