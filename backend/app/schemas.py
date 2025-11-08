@@ -8,8 +8,9 @@ class ChatMessage(BaseModel):
 
 
 class ChatRequest(BaseModel):
-    company_code: str        # e.g. "RIL_CONSOLIDATED"
-    role: str                # "Analyst" | "CEO" | "Group Management"
+    document_id: Optional[int] = None  # primary way to identify context (for uploaded PDFs)
+    company_code: Optional[str] = None  # legacy/demo mode (for seeded companies)
+    role: str  # "Analyst" | "CEO" | "Group Management"
     messages: List[ChatMessage]
 
 
@@ -26,3 +27,9 @@ class ChartData(BaseModel):
 class ChatResponse(BaseModel):
     answer: str
     chart_data: Optional[ChartData] = None
+
+
+class UploadResponse(BaseModel):
+    document_id: int
+    company_name: Optional[str] = None
+    fiscal_year: Optional[str] = None

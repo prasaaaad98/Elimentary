@@ -1,11 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from typing import List
+from typing import List, Tuple, Dict
 import math
 import re
 
 from app.database import get_db
-from app.models import Company, FinancialMetric
+from app.models import Company, FinancialMetric, Document
 from app.schemas import ChatRequest, ChatResponse, ChartData, ChartSeries
 from app.llm import call_llm
 
@@ -14,14 +14,41 @@ router = APIRouter()
 
 def get_last_n_years_metrics(
     db: Session, company_id: int, metric_names: List[str], n: int = 3
-):
+) -> Tuple[List[int], Dict[str, Dict[int, float]]]:
     """
-    Returns (years, {metric_name: {year: value}})
+    Returns (years, {metric_name: {year: value}}) for company-based metrics
     """
     q = (
         db.query(FinancialMetric)
         .filter(
             FinancialMetric.company_id == company_id,
+            FinancialMetric.metric_name.in_(metric_names),
+        )
+        .order_by(FinancialMetric.year.desc())
+    )
+    rows = q.all()
+    result = {m: {} for m in metric_names}
+    years = set()
+    for row in rows:
+        if len(result[row.metric_name]) >= n:
+            continue
+        result[row.metric_name][row.year] = row.value
+        years.add(row.year)
+    years = sorted(list(years))
+    return years, result
+
+
+def get_metrics_for_document(
+    db: Session, document_id: int, metric_names: List[str], n: int = 10
+) -> Tuple[List[int], Dict[str, Dict[int, float]]]:
+    """
+    Returns (years, {metric_name: {year: value}}) for document-based metrics.
+    Gets all available metrics (up to n years) from the uploaded document.
+    """
+    q = (
+        db.query(FinancialMetric)
+        .filter(
+            FinancialMetric.document_id == document_id,
             FinancialMetric.metric_name.in_(metric_names),
         )
         .order_by(FinancialMetric.year.desc())
@@ -198,68 +225,90 @@ def _build_quick_overview(company_name: str, years: list[int], metrics: dict, ro
 
 @router.post("/query", response_model=ChatResponse)
 def chat_query(payload: ChatRequest, db: Session = Depends(get_db)):
-    # 1. Company lookup
-    company = db.query(Company).filter(Company.code == payload.company_code).first()
-    if not company:
-        raise HTTPException(status_code=404, detail="Company not found")
-
-    # 2. Demo: use revenue + net_profit for last 3 years
-    metric_names = ["revenue", "net_profit"]
-    years, metrics = get_last_n_years_metrics(db, company.id, metric_names, n=3)
-
-    # 3. Build data context string
+    # Determine context: document_id (preferred) or company_code (legacy)
+    company_name = None
+    fiscal_year = None
+    years = []
+    metrics = {}
+    
+    if payload.document_id:
+        # Document-based context (uploaded PDF)
+        doc = db.query(Document).filter(Document.id == payload.document_id).first()
+        if not doc:
+            raise HTTPException(status_code=404, detail="Document not found")
+        
+        company_name = doc.company_name or "Unknown Company"
+        fiscal_year = doc.fiscal_year
+        
+        # Get all available metrics from the document
+        metric_names = ["revenue", "net_profit", "total_assets", "total_liabilities"]
+        years, metrics = get_metrics_for_document(db, doc.id, metric_names, n=10)
+    
+    elif payload.company_code:
+        # Legacy company-based context (seeded data)
+        company = db.query(Company).filter(Company.code == payload.company_code).first()
+        if not company:
+            raise HTTPException(status_code=404, detail="Company not found")
+        
+        company_name = company.name
+        metric_names = ["revenue", "net_profit"]
+        years, metrics = get_last_n_years_metrics(db, company.id, metric_names, n=3)
+    
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail="Either document_id or company_code must be provided"
+        )
+    
+    # Build data context string with all available metrics
     if years:
         data_lines = []
-        for y in years:
-            rev = metrics["revenue"].get(y)
-            pat = metrics["net_profit"].get(y)
-            data_lines.append(f"FY {y}: revenue={rev}, net_profit={pat}")
-        data_context = "\n".join(data_lines)
+        for y in sorted(years):
+            parts = [f"FY {y}:"]
+            if "revenue" in metrics and metrics["revenue"].get(y) is not None:
+                parts.append(f"revenue={metrics['revenue'].get(y)}")
+            if "net_profit" in metrics and metrics["net_profit"].get(y) is not None:
+                parts.append(f"net_profit={metrics['net_profit'].get(y)}")
+            if "total_assets" in metrics and metrics["total_assets"].get(y) is not None:
+                parts.append(f"total_assets={metrics['total_assets'].get(y)}")
+            if "total_liabilities" in metrics and metrics["total_liabilities"].get(y) is not None:
+                parts.append(f"total_liabilities={metrics['total_liabilities'].get(y)}")
+            if len(parts) > 1:  # Only add if we have at least one metric
+                data_lines.append(" ".join(parts))
+        data_context = "\n".join(data_lines) if data_lines else "No financial data available."
     else:
         data_context = "No financial data available."
-
-        # 4. Get the user's latest message
+    
+    # Get the user's latest message
     user_question = payload.messages[-1].content if payload.messages else ""
-
-    # ---- NEW: greetings ----
+    
+    # ---- Greetings ----
     if _is_greeting(user_question):
         greeting_answer = (
-            f"Hi! I'm your financial copilot for {company.name}. "
+            f"Hi! I'm your financial copilot for {company_name}. "
             "You can ask me about revenue, profit, assets, liabilities, trends, "
-            "or ratios based on the company's published balance sheet."
+            "or ratios based on the uploaded balance sheet document."
         )
+        if fiscal_year:
+            greeting_answer += f" This document covers {fiscal_year}."
         return ChatResponse(answer=greeting_answer, chart_data=None)
-
-    # ---- NEW: vague/overview -> quick summary without LLM ----
+    
+    # ---- Vague/overview -> quick summary without LLM ----
     if _is_smalltalk_or_overview(user_question):
-        overview = _build_quick_overview(company.name, years, metrics, payload.role)
-        # Optional: include simple chart_data for context
-        chart_data = None
-        if years:
-            series = []
-            if metrics["revenue"]:
-                series.append(
-                    ChartSeries(
-                        label="Revenue",
-                        values=[metrics["revenue"].get(y, 0.0) for y in years],
-                    )
-                )
-            if metrics["net_profit"]:
-                series.append(
-                    ChartSeries(
-                        label="Net Profit",
-                        values=[metrics["net_profit"].get(y, 0.0) for y in years],
-                    )
-                )
-            chart_data = ChartData(years=years, series=series)
+        overview = _build_quick_overview(company_name, years, metrics, payload.role)
+        # Include chart_data for context
+        chart_data = _build_chart_data(years, metrics)
         return ChatResponse(answer=overview, chart_data=chart_data)
-# 4. System prompt tuned by role
+    
+    # ---- System prompt tuned by role ----
     system_prompt = (
         "You are a financial analyst assistant for balance sheet and P&L analysis. "
-        "You MUST base your answer ONLY on the data provided in the context. "
-        "If a specific number or year is not provided, say you don't have that information."
+        "You MUST base your answer ONLY on the data provided in the context from the uploaded document. "
+        "If a specific number or year is not provided in the context, explicitly say you don't have that information from this document. "
+        "Do NOT invent or hallucinate data. Do NOT use information from the internet or general knowledge. "
+        "Only use the exact numbers provided in the context."
     )
-
+    
     rl = payload.role.lower()
     if "ceo" in rl:
         system_prompt += (
@@ -274,41 +323,80 @@ def chat_query(payload: ChatRequest, db: Session = Depends(get_db)):
         system_prompt += (
             " The user is senior management. Provide an executive summary with some key numbers."
         )
-
-    # 5. Compose final user prompt for Gemini
+    
+    # Compose final user prompt for Gemini
+    fiscal_info = f" (Fiscal Year: {fiscal_year})" if fiscal_year else ""
     full_user_prompt = f"""
-Company: {company.name}
+Company: {company_name}{fiscal_info}
 Role: {payload.role}
 
-Available financial data (up to last 3 years):
+Available financial data extracted from the uploaded document:
 {data_context}
 
 User question:
 {user_question}
 
-Using ONLY the data above, answer the question. Do not invent years or numbers you do not see.
+Using ONLY the data above from this specific document, answer the question. 
+Do not invent years or numbers you do not see. 
+If the question asks about something not in the data, say "I don't have that information from this document."
 """
-
+    
     llm_answer = call_llm(system_prompt, full_user_prompt)
-
-    # 6. Build chart_data for frontend (simple for now)
-    chart_data = None
-    if years:
-        series = []
-        if metrics["revenue"]:
-            series.append(
-                ChartSeries(
-                    label="Revenue",
-                    values=[metrics["revenue"].get(y, 0.0) for y in years],
-                )
-            )
-        if metrics["net_profit"]:
-            series.append(
-                ChartSeries(
-                    label="Net Profit",
-                    values=[metrics["net_profit"].get(y, 0.0) for y in years],
-                )
-            )
-        chart_data = ChartData(years=years, series=series)
-
+    
+    # Build chart_data for frontend with all available metrics
+    chart_data = _build_chart_data(years, metrics)
+    
     return ChatResponse(answer=llm_answer, chart_data=chart_data)
+
+
+def _build_chart_data(years: List[int], metrics: Dict[str, Dict[int, float]]) -> ChartData | None:
+    """
+    Build ChartData from years and metrics dict.
+    Includes all available metrics: revenue, net_profit, total_assets, total_liabilities.
+    """
+    if not years:
+        return None
+    
+    sorted_years = sorted(years)
+    series = []
+    
+    # Add revenue if available
+    if "revenue" in metrics and metrics["revenue"]:
+        series.append(
+            ChartSeries(
+                label="Revenue",
+                values=[metrics["revenue"].get(y, 0.0) for y in sorted_years],
+            )
+        )
+    
+    # Add net_profit if available
+    if "net_profit" in metrics and metrics["net_profit"]:
+        series.append(
+            ChartSeries(
+                label="Net Profit",
+                values=[metrics["net_profit"].get(y, 0.0) for y in sorted_years],
+            )
+        )
+    
+    # Add total_assets if available
+    if "total_assets" in metrics and metrics["total_assets"]:
+        series.append(
+            ChartSeries(
+                label="Total Assets",
+                values=[metrics["total_assets"].get(y, 0.0) for y in sorted_years],
+            )
+        )
+    
+    # Add total_liabilities if available
+    if "total_liabilities" in metrics and metrics["total_liabilities"]:
+        series.append(
+            ChartSeries(
+                label="Total Liabilities",
+                values=[metrics["total_liabilities"].get(y, 0.0) for y in sorted_years],
+            )
+        )
+    
+    if not series:
+        return None
+    
+    return ChartData(years=sorted_years, series=series)
