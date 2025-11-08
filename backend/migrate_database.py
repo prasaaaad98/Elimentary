@@ -63,6 +63,16 @@ def migrate_database():
         else:
             print("[OK] processed_at column already exists")
         
+        # Add content_hash column if it doesn't exist (for deduplication)
+        if "content_hash" not in columns:
+            print("Adding content_hash column...")
+            cursor.execute("ALTER TABLE documents ADD COLUMN content_hash TEXT")
+            # Create index for faster lookups
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_documents_content_hash ON documents(content_hash)")
+            print("[OK] Added content_hash column and index")
+        else:
+            print("[OK] content_hash column already exists")
+        
         # Set default created_at for existing rows that have NULL
         print("Setting default created_at for existing rows...")
         cursor.execute("""

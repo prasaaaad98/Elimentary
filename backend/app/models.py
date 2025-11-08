@@ -20,6 +20,7 @@ class Document(Base):
     id = Column(Integer, primary_key=True, index=True)
     filename = Column(String, nullable=False)
     storage_path = Column(String, nullable=False)  # local path to saved PDF
+    content_hash = Column(String, nullable=True, index=True)  # SHA-256 hash for deduplication
     company_name = Column(String, nullable=True)
     fiscal_year = Column(String, nullable=True)  # e.g. "FY 2023-24"
     company_code = Column(String, nullable=True)  # optional, for grouping/legacy

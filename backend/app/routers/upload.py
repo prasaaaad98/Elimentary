@@ -40,6 +40,36 @@ async def upload_balance_sheet(
         )
     
     try:
+        # Read file content first to compute hash for deduplication
+        content = await file.read()
+        
+        # Compute content hash for deduplication
+        import hashlib
+        content_hash = hashlib.sha256(content).hexdigest()
+        
+        # Check if a document with the same content hash already exists
+        # This prevents creating duplicate documents when the same PDF is uploaded multiple times
+        existing_doc = db.query(Document).filter(
+            Document.content_hash == content_hash,
+            Document.is_financial_report == True
+        ).first()
+        
+        if existing_doc:
+            # Document with same content already exists - return existing document
+            # This ensures consistent metrics (no re-parsing with potentially different LLM results)
+            db.refresh(existing_doc)
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.info(
+                f"Duplicate document detected (hash: {content_hash[:8]}...). "
+                f"Returning existing document ID {existing_doc.id}"
+            )
+            return UploadResponse(
+                document_id=existing_doc.id,
+                company_name=existing_doc.company_name,
+                fiscal_year=existing_doc.fiscal_year
+            )
+        
         # Generate unique filename
         file_uuid = str(uuid.uuid4())
         file_extension = Path(file.filename).suffix
@@ -48,7 +78,6 @@ async def upload_balance_sheet(
         
         # Save file
         with open(storage_path, "wb") as f:
-            content = await file.read()
             f.write(content)
         
         # Get absolute path for storage in DB
@@ -70,6 +99,7 @@ async def upload_balance_sheet(
         doc = Document(
             filename=file.filename,
             storage_path=absolute_path,
+            content_hash=content_hash,  # Store hash for future deduplication
             company_name=None,  # Will be filled by parser
             fiscal_year=None,   # Will be filled by parser
             company_code=None,
