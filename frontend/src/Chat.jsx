@@ -18,11 +18,11 @@ const SendIcon = ({ disabled }) => (
   </svg>
 );
 
-export default function Chat({ companyCode, companyName, role, onReset }) {
+export default function Chat({ documentId, companyCode, companyName, fiscalYear, role, onReset }) {
   const [messages, setMessages] = useState([
     {
       role: "assistant",
-      content: `You are analyzing ${companyName} as a ${role}. Ask anything about its financial performance.`,
+      content: `You are analyzing ${companyName || "the company"} as a ${role}. Ask anything about its financial performance.`,
     },
   ]);
   const [input, setInput] = useState("");
@@ -51,13 +51,19 @@ export default function Chat({ companyCode, companyName, role, onReset }) {
 
     try {
       const payload = {
-        company_code: companyCode,
         role,
         messages: newMessages.map((m) => ({
           role: m.role,
           content: m.content,
         })),
       };
+
+      // Use document_id if available (upload mode), otherwise use company_code (legacy mode)
+      if (documentId) {
+        payload.document_id = documentId;
+      } else if (companyCode) {
+        payload.company_code = companyCode;
+      }
 
       const res = await axios.post(`${backendBaseUrl}/chat/query`, payload);
       const data = res.data;
@@ -68,14 +74,34 @@ export default function Chat({ companyCode, companyName, role, onReset }) {
       ]);
       setChartData(data.chart_data || null);
     } catch (err) {
-      console.error(err);
+      console.error("Chat error:", err);
+      let errorMessage = "Sorry, something went wrong talking to the backend.";
+      
+      if (err.response) {
+        // Server responded with error
+        const status = err.response.status;
+        if (status === 404) {
+          errorMessage = "Document or company not found. Please try uploading again or select a different company.";
+        } else if (status === 400) {
+          errorMessage = err.response.data?.detail || "Invalid request. Please check your input.";
+        } else if (status >= 500) {
+          errorMessage = "Server error. Please try again later.";
+        } else {
+          errorMessage = err.response.data?.detail || errorMessage;
+        }
+      } else if (err.request) {
+        // Request was made but no response received
+        errorMessage = "Unable to connect to server. Please check your connection.";
+      }
+      
       setMessages([
         ...newMessages,
         {
           role: "assistant",
-          content: "Sorry, something went wrong talking to the backend.",
+          content: errorMessage,
         },
       ]);
+      setChartData(null); // Clear chart data on error
     } finally {
       setLoading(false);
       inputRef.current?.focus();
@@ -113,10 +139,10 @@ export default function Chat({ companyCode, companyName, role, onReset }) {
       >
         <div>
           <div style={{ fontSize: "16px", fontWeight: "600", color: "#ffffff" }}>
-            {companyName}
+            {companyName || "Unknown Company"}
           </div>
           <div style={{ fontSize: "13px", color: "rgba(255, 255, 255, 0.6)", marginTop: "4px" }}>
-            Role: {role}
+            {fiscalYear && `Year: ${fiscalYear} • `}Role: {role}
           </div>
         </div>
         <button
