@@ -7,7 +7,7 @@ from app.routers import chat, upload, documents
 # Create tables
 Base.metadata.create_all(bind=engine)
 
-app = FastAPI(title="BalanceSheet Chat Backend (Gemini)")
+app = FastAPI(title="BalanceSheet Chat Backend")
 
 
 # CORS (allow all during dev – tighten for prod)
