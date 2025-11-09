@@ -6,3 +6,5 @@ pydantic-settings
 python-dotenv
 google-generativeai
 pdfplumber
+python-multipart
+
