@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import axios from "axios";
+import MetricsChart from "./MetricsChart";
 
 // Send icon SVG component
 const SendIcon = ({ disabled }) => (
@@ -23,11 +24,11 @@ export default function Chat({ documentId, companyCode, companyName, fiscalYear,
     {
       role: "assistant",
       content: `You are analyzing ${companyName || "the company"} as a ${role}. Ask anything about its financial performance.`,
+      chartData: null,
     },
   ]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
-  const [chartData, setChartData] = useState(null);
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
 
@@ -41,9 +42,9 @@ export default function Chat({ documentId, companyCode, companyName, fiscalYear,
         {
           role: "assistant",
           content: `You are analyzing ${companyName || "the company"} as a ${role}. Ask anything about its financial performance.`,
+          chartData: null,
         },
       ]);
-      setChartData(null);
       prevDocumentIdRef.current = documentId;
     }
   }, [documentId, companyName, role]);
@@ -85,9 +86,12 @@ export default function Chat({ documentId, companyCode, companyName, fiscalYear,
 
       setMessages([
         ...newMessages,
-        { role: "assistant", content: data.answer },
+        { 
+          role: "assistant", 
+          content: data.answer,
+          chartData: data.chart_data || null,
+        },
       ]);
-      setChartData(data.chart_data || null);
     } catch (err) {
       console.error("Chat error:", err);
       let errorMessage = "Sorry, something went wrong talking to the backend.";
@@ -114,9 +118,9 @@ export default function Chat({ documentId, companyCode, companyName, fiscalYear,
         {
           role: "assistant",
           content: errorMessage,
+          chartData: null,
         },
       ]);
-      setChartData(null); // Clear chart data on error
     } finally {
       setLoading(false);
       inputRef.current?.focus();
@@ -308,7 +312,12 @@ export default function Chat({ documentId, companyCode, companyName, fiscalYear,
                       : "none",
                 }}
               >
-                {m.content}
+                <div style={{ whiteSpace: "pre-wrap" }}>{m.content}</div>
+                {m.role === "assistant" && m.chartData && (
+                  <div style={{ marginTop: "16px" }}>
+                    <MetricsChart chartData={m.chartData} />
+                  </div>
+                )}
               </div>
             </div>
           ))}
@@ -337,54 +346,6 @@ export default function Chat({ documentId, companyCode, companyName, fiscalYear,
           <div ref={messagesEndRef} />
         </div>
       </div>
-
-      {/* Chart Data Display */}
-      {chartData && (
-        <div
-          style={{
-            maxWidth: "900px",
-            width: "100%",
-            margin: "0 auto 16px auto",
-            padding: "0 24px",
-          }}
-        >
-          <div
-            style={{
-              background: "rgba(255, 255, 255, 0.05)",
-              borderRadius: "12px",
-              padding: "20px",
-              border: "1px solid rgba(255, 255, 255, 0.1)",
-            }}
-          >
-            <h3
-              style={{
-                fontSize: "16px",
-                fontWeight: "600",
-                color: "#ffffff",
-                margin: "0 0 12px 0",
-              }}
-            >
-              Key Metrics
-            </h3>
-            <p style={{ fontSize: "14px", color: "rgba(255, 255, 255, 0.7)", margin: "0 0 12px 0" }}>
-              Years: {chartData.years.join(", ")}
-            </p>
-            {chartData.series.map((s) => (
-              <div
-                key={s.label}
-                style={{
-                  fontSize: "14px",
-                  color: "rgba(255, 255, 255, 0.8)",
-                  marginBottom: "8px",
-                }}
-              >
-                <strong style={{ color: "#4a9eff" }}>{s.label}:</strong>{" "}
-                {s.values.join(", ")}
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
 
       {/* Input Area - Fixed at Bottom */}
       <div
