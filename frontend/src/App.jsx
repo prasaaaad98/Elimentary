@@ -4,7 +4,9 @@ import "./App.css";
 import Startup from "./Startup";
 import Chat from "./Chat";
 
-const backendBaseUrl = "http://127.0.0.1:8000";
+const backendBaseUrl =
+  import.meta.env.VITE_BACKEND_URL || "http://localhost:8000";
+
 
 function App() {
   // Session state - unified structure

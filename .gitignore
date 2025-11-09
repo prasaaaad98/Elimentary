@@ -2,3 +2,9 @@ __pycache__/\n.env\n*.pyc\nvenv/\nnode_modules/\n.dist/\n.build/
 balancesheet.db
 *.db
 .env
+venv/
+.env
+balancesheet.db
+__pycache__/
+node_modules/
+dist/
