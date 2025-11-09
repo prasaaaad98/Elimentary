@@ -21,6 +21,7 @@ class ChartSeries(BaseModel):
 
 
 class ChartData(BaseModel):
+    chart_type: Optional[Literal["line", "bar", "pie"]] = "line"  # Default to line for backward compatibility
     years: List[int]
     series: List[ChartSeries]
 

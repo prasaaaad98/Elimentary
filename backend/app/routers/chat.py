@@ -9,6 +9,7 @@ from app.models import Company, FinancialMetric, Document
 from app.schemas import ChatRequest, ChatResponse, ChartData, ChartSeries
 from app.llm import call_llm
 from app.retrieval import retrieve_relevant_chunks
+from app.charts import plan_chart_config, build_chart_data_from_plan
 
 router = APIRouter()
 
@@ -283,6 +284,22 @@ def chat_query(payload: ChatRequest, db: Session = Depends(get_db)):
     # Get the user's latest message
     user_question = payload.messages[-1].content if payload.messages else ""
     
+    # ---- Detect visualization intent ----
+    q_lower = user_question.lower()
+    wants_visualization = any(
+        kw in q_lower
+        for kw in ["show", "visualize", "visualise", "plot", "graph", "chart", "draw", "diagram"]
+    )
+    
+    # ---- Build metrics_by_year dict for chart planner ----
+    metrics_by_year: Dict[int, Dict[str, float]] = {}
+    if years:
+        for y in years:
+            metrics_by_year[y] = {}
+            for metric_name in ["revenue", "net_profit", "total_assets", "total_liabilities"]:
+                if metric_name in metrics and metrics[metric_name].get(y) is not None:
+                    metrics_by_year[y][metric_name] = metrics[metric_name][y]
+    
     # ---- Greetings ----
     if _is_greeting(user_question):
         greeting_answer = (
@@ -297,8 +314,20 @@ def chat_query(payload: ChatRequest, db: Session = Depends(get_db)):
     # ---- Vague/overview -> quick summary without LLM ----
     if _is_smalltalk_or_overview(user_question):
         overview = _build_quick_overview(company_name, years, metrics, payload.role)
-        # Include chart_data for context
-        chart_data = _build_chart_data(years, metrics)
+        # Only show chart if user explicitly asked for visualization
+        chart_data = None
+        if wants_visualization and metrics_by_year:
+            plan = plan_chart_config(user_question, metrics_by_year)
+            if plan.get("wants_chart"):
+                chart_data_dict = build_chart_data_from_plan(plan, metrics_by_year)
+                if chart_data_dict:
+                    # Convert dict to ChartData model
+                    from app.schemas import ChartData, ChartSeries
+                    chart_data = ChartData(
+                        chart_type=chart_data_dict["chart_type"],
+                        years=chart_data_dict["years"],
+                        series=[ChartSeries(**s) for s in chart_data_dict["series"]]
+                    )
         return ChatResponse(answer=overview, chart_data=chart_data)
     
     # ---- RAG: Retrieve relevant text chunks (only for document-based queries) ----
@@ -389,8 +418,26 @@ say "I don't have that information from this document." Do not make up facts or 
     
     llm_answer = call_llm(system_prompt, full_user_prompt)
     
-    # Build chart_data for frontend with all available metrics
-    chart_data = _build_chart_data(years, metrics)
+    # Build chart_data only if user explicitly asked for visualization
+    chart_data = None
+    if wants_visualization and metrics_by_year:
+        try:
+            plan = plan_chart_config(user_question, metrics_by_year)
+            if plan.get("wants_chart"):
+                chart_data_dict = build_chart_data_from_plan(plan, metrics_by_year)
+                if chart_data_dict:
+                    # Convert dict to ChartData model
+                    from app.schemas import ChartData, ChartSeries
+                    chart_data = ChartData(
+                        chart_type=chart_data_dict["chart_type"],
+                        years=chart_data_dict["years"],
+                        series=[ChartSeries(**s) for s in chart_data_dict["series"]]
+                    )
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(f"Error building chart data: {e}")
+            # Continue without chart_data - chat still works
     
     return ChatResponse(answer=llm_answer, chart_data=chart_data)
 
