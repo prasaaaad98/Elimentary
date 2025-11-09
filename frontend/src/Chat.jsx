@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import axios from "axios";
 import MetricsChart from "./MetricsChart";
+import { BACKEND_BASE_URL } from "./config";
 
 // Send icon SVG component
 const SendIcon = ({ disabled }) => (
@@ -31,8 +32,6 @@ export default function Chat({ documentId, companyCode, companyName, fiscalYear,
   const [loading, setLoading] = useState(false);
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
-
-  const backendBaseUrl = "http://127.0.0.1:8000";
 
   // Reset messages when documentId changes (only on actual change, not on initial mount if already set)
   const prevDocumentIdRef = useRef(documentId);
@@ -81,7 +80,7 @@ export default function Chat({ documentId, companyCode, companyName, fiscalYear,
         payload.company_code = companyCode;
       }
 
-      const res = await axios.post(`${backendBaseUrl}/chat/query`, payload);
+      const res = await axios.post(`${BACKEND_BASE_URL}/chat/query`, payload);
       const data = res.data;
 
       setMessages([

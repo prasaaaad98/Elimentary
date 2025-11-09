@@ -1,5 +1,6 @@
 import { useState } from "react";
 import axios from "axios";
+import { BACKEND_BASE_URL } from "./config";
 
 const companies = [
   { code: "RIL_CONSOLIDATED", name: "Reliance Industries (Consolidated)" },
@@ -7,8 +8,6 @@ const companies = [
 ];
 
 const roles = ["Analyst", "CEO", "Group Management"];
-
-const backendBaseUrl = "http://127.0.0.1:8000";
 
 export default function Startup({ onStart, documents = [], onDocumentsReload }) {
   const [selectedCompany, setSelectedCompany] = useState(companies[0].code);
@@ -64,7 +63,7 @@ export default function Startup({ onStart, documents = [], onDocumentsReload }) 
       formData.append("file", selectedFile);
 
       const response = await axios.post(
-        `${backendBaseUrl}/upload/balance-sheet`,
+        `${BACKEND_BASE_URL}/upload/balance-sheet`,
         formData,
         {
           headers: {

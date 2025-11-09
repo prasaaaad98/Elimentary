@@ -3,9 +3,7 @@ import axios from "axios";
 import "./App.css";
 import Startup from "./Startup";
 import Chat from "./Chat";
-
-const backendBaseUrl =
-  import.meta.env.VITE_BACKEND_URL || "http://localhost:8000";
+import { BACKEND_BASE_URL } from "./config";
 
 
 function App() {
@@ -16,7 +14,7 @@ function App() {
   // Fetch documents on mount and when needed
   const fetchDocuments = async () => {
     try {
-      const res = await axios.get(`${backendBaseUrl}/documents`);
+      const res = await axios.get(`${BACKEND_BASE_URL}/documents`);
       setDocuments(res.data.documents || []);
     } catch (err) {
       console.error("Failed to load documents list", err);
