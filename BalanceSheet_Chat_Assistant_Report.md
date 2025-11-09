@@ -622,4 +622,3 @@ While some advanced features (full auth/RBAC, persistent managed storage, cross-
   - Role-aware behaviour without full auth
 - Clear **architecture & deployment** story appropriate for an assignment of this scope.
 
-This report, alongside the code and live deployment, forms the complete submission for the assignment.
